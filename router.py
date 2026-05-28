@@ -756,7 +756,7 @@ async def execute_task(task: TaskRequest):
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
-            cwd="/home/alper/videolar/labs/openclaw-sandbox/workspace",
+            cwd="/tmp",
         )
 
         duration_ms = int((time.time() - start_time) * 1000)
