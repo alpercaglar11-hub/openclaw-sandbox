@@ -796,6 +796,22 @@ async def execute_task(task: TaskRequest):
         )
 
 
+@app.get("/api/health", response_model=HealthResponse)
+async def api_health_check():
+    """Health check at /api/health — same handler as /health.
+    Exposed for nginx proxy compatibility when frontend calls /api/*.
+    """
+    return await health_check()
+
+
+@app.get("/api/status", response_model=StatusResponse)
+async def api_get_status():
+    """System status at /api/status — same handler as /status.
+    Exposed for nginx proxy compatibility when frontend calls /api/*.
+    """
+    return await get_status()
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint with dependency verification.
