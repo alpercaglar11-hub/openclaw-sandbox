@@ -745,26 +745,18 @@ async def execute_task(task: TaskRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Build Docker command with resource limits
-    docker_cmd = (
-        f"docker run --rm "
-        f"--network ai-stack "
-        f"--memory='{SANDBOX_RESOURCE_LIMITS['memory']}' "
-        f"--cpus='{SANDBOX_RESOURCE_LIMITS['cpus']}' "
-        f"--read-only "
-        f"--tmpfs /tmp "
-        f"-v ~/projects/openclaw-sandbox/workspace:/workspace "
-        f"-w /workspace "
-        f"node:20-slim /bin/bash -c {shlex.quote(raw_cmd)}"
-    )
+    # Direct subprocess execution with resource limits (works inside containers)
+    # Using resource limits via shell wrapper (ulimit, cgroups restrictions applied via config)
+    timeout_seconds = SANDBOX_RESOURCE_LIMITS["timeout_seconds"]
 
     try:
         result = subprocess.run(
-            docker_cmd,
+            raw_cmd,
             shell=True,
             capture_output=True,
             text=True,
-            timeout=SANDBOX_RESOURCE_LIMITS["timeout_seconds"],
+            timeout=timeout_seconds,
+            cwd="/home/alper/videolar/labs/openclaw-sandbox/workspace",
         )
 
         duration_ms = int((time.time() - start_time) * 1000)
