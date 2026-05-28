@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+aiosqlite
+python-telegram-bot
+websockets
+httpx
+pytest
+pytest-asyncio
+pytest-httpx
