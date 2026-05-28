@@ -1,0 +1,51 @@
+# OpenClaw Autonomous Runtime - Production Docker Compose
+# Usage: sg docker -c "docker compose up --build -d"
+# Note: Start Ollama on host before launching.
+
+services:
+  router:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openclaw-router
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - ADMIN_CHAT_ID=${ADMIN_CHAT_ID:-}
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./workspace:/app/workspace
+      - ./logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ai-stack
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: openclaw-dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      router:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ai-stack
+
+networks:
+  ai-stack:
+    driver: bridge

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Activity, LayoutDashboard, GitBranch, ListTodo, BarChart3, Heart, Clock } from 'lucide-react'
+import { Activity, GitBranch, ListTodo, BarChart3, Heart, Clock } from 'lucide-react'
 import LiveMonitor from './pages/LiveMonitor'
 import ExecutionGraph from './pages/ExecutionGraph'
 import TaskQueue from './pages/TaskQueue'

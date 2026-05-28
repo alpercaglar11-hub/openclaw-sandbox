@@ -12,26 +12,19 @@ RUN npm run build
 # Production stage with nginx
 FROM nginx:alpine
 
-# Create non-root user
-RUN addgroup -r app && adduser -r -g app app
-
-# Copy nginx config
-RUN mkdir -p /etc/nginx/conf.d /var/www/html && chown -R app:app /var/www/html
-
-# Copy built assets
-COPY --from=builder /app/dist /var/www/html
+# Fix nginx cache dirs for non-root
+RUN mkdir -p /var/cache/nginx/client_temp /var/cache/nginx/proxy_temp /var/log/nginx \
+    && chown -R nginx:nginx /var/cache/nginx /var/log/nginx 2>/dev/null || true
 
 # Copy nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Create logs directory
-RUN mkdir -p /var/log/nginx && chown -R app:app /var/log/nginx
-
-USER app
+# Copy built assets
+COPY --from=builder /app/dist /var/www/html
 
 EXPOSE 80
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost/health || exit 1
+  CMD wget -qO- http://localhost/health || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]
