@@ -1,6 +1,6 @@
 """Task decomposition and routing agent.
 
-Uses Ollama qwen2.5-coder:7b to decompose tasks and route them to appropriate
+Uses Ollama qwen2.5-coder:1.5b to decompose tasks and route them to appropriate
 agents based on task characteristics.
 """
 
@@ -93,7 +93,7 @@ class Task:
 class HermesManager:
     """Task decomposition and routing manager.
 
-    Uses Ollama qwen2.5-coder:7b to analyze tasks, decompose them into
+    Uses Ollama qwen2.5-coder:1.5b to analyze tasks, decompose them into
     subtasks, and route to appropriate execution agents.
 
     Attributes:
@@ -145,17 +145,19 @@ class HermesManager:
 
         try:
             response = await self._http_client.post(
-                f"{self.config.ollama_url}/api/generate",
+                f"{self.config.ollama_url}/api/chat",
                 json={
                     "model": self.config.ollama_model,
-                    "prompt": prompt,
-                    "system": system,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": prompt},
+                    ],
                     "stream": False,
                 },
             )
             response.raise_for_status()
             result = response.json()
-            return result.get("response", "").strip()
+            return result.get("message", {}).get("content", "").strip()
         except httpx.HTTPError as e:
             logger.error(f"Ollama HTTP error: {e}")
             return None

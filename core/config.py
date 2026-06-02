@@ -16,9 +16,9 @@ class Config:
     """Application configuration loaded from environment variables."""
 
     # Ollama configuration
-    ollama_url: str = field(default_factory=lambda: os.getenv("OLLAMA_URL", "http://localhost:11434"))
-    ollama_model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b"))
-
+    deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY"))
+    deepseek_base_url: str = field(default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
+    deepseek_model: str = field(default_factory=lambda: os.getenv("DEEPSEEK_MODEL", "deepseek-chat"))
     # Router/service URLs
     router_url: str = field(default_factory=lambda: os.getenv("ROUTER_URL", "http://localhost:8000"))
 
@@ -62,7 +62,7 @@ class Config:
 
     def _validate_urls(self) -> None:
         """Validate that URLs are properly formatted."""
-        if not self.ollama_url.startswith(("http://", "https://")):
+        if hasattr(self, "ollama_url") and self.ollama_url and not self.ollama_url.startswith(("http://", "https://")):
             logger.warning(
                 f"Ollama URL '{self.ollama_url}' may be invalid, "
                 "should start with http:// or https://"

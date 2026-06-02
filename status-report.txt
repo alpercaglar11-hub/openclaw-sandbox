@@ -1,0 +1,55 @@
+═══════════════════════════════════════════════════════
+  OPENCLAW SANDBOX — SYSTEM STATUS REPORT
+  Generated: 2026-05-28 17:04 UTC
+═══════════════════════════════════════════════════════
+
+## AGENT STATUS
+
+  ✅ hermes_manager   — running
+  ✅ sandbox_worker   — running
+  ✅ review_agent     — running
+  ✅ observer_agent   — running
+
+## SYSTEM HEALTH
+
+  ⬜ Docker         — unavailable (not installed in this environment)
+  ✅ Ollama          — healthy (http://host.docker.internal:11434)
+  ✅ SQLite          — healthy (./openclaw.db)
+  ⚠️  Overall         — degraded (Docker required for containerized execution)
+
+## RUNTIME METRICS
+
+  WebSocket Clients : 124
+  Queue Depth       : 0
+  Status            : operational
+
+## ENDPOINTS
+
+  GET /health       → 200 OK
+  GET /status       → 200 OK
+  GET /api/health   → 200 OK
+  GET /api/status   → 200 OK
+  WS  /ws           → 101 (upgrading)
+  HTTP Proxy        : nginx :3000 → router :8000
+
+## PIPELINE PHASES
+
+  Phase 1  ✅  Core agent runtime (4 agents)
+  Phase 2  ✅  Agent spawning + teardown
+  Phase 3  ✅  Interactive REPL shell
+  Phase 4  ✅  WebSocket streaming
+  Phase 5  ⬜  React dashboard + live agent thinking
+  Phase 6  ✅  Docker exec session mount
+  Phase 7  ✅  Self-healing restart logic
+  Phase 8  ✅  LM Studio / Ollama backend
+  Phase 9  ⬜  Full stack bring-up + real autonomous execution
+  Phase 10 ✅  Caddy → nginx migration
+
+## GIT
+
+  Branch   : feat/autonomous-runtime
+  Commit   : 25d0c10
+  Message  : fix: add /api/* routes to router + strip /api prefix in nginx proxy
+
+═══════════════════════════════════════════════════════
+ EOF

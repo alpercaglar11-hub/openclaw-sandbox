@@ -1,3 +1,4 @@
+import httpx
 import requests
 import json
 
@@ -5,12 +6,15 @@ ROUTER_URL = "http://localhost:8000/execute"
 OLLAMA_URL = "http://host.docker.internal:11434/api/chat"
 
 # 1. Hermes'in kullanabileceği Sandbox Yürütme Aracı (Tool Function)
-def run_in_sandbox(command: str) -> str:
+async def run_in_sandbox(command: str) -> str:
     """
     Güvenli Docker Sandbox konteyneri içinde Linux (Node.js/Bash) komutları çalıştırır.
     """
     try:
-        response = requests.post(ROUTER_URL, json={"command": command}, timeout=65)
+     async with httpx.AsyncClient(timeout=90.0) as client:
+            http_response = await client.post(ROUTER_URL, json={"command": command}, timeout=65.0)
+            http_response.raise_for_status()
+            response = http_response.json()
         return json.dumps(response.json(), indent=2)
     except Exception as e:
         return f"Router bağlantı hatası: {str(e)}"
@@ -67,7 +71,7 @@ def ask_hermes(user_prompt: str):
                 print(f"💻 [COMMAND]: {cmd_to_run}")
                 
                 # Aracı çalıştır ve sonucu al
-                sandbox_result = run_in_sandbox(cmd_to_run)
+                sandbox_result = await run_in_sandbox(cmd_to_run)
                 print(f"\n📦 [SANDBOX OUTPUT]:\n{sandbox_result}")
         else:
             print(f"\n🤖 [HERMES]: {message.get('content')}")

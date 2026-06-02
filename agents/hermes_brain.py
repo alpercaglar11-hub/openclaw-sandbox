@@ -42,18 +42,13 @@ SANDBOX_TOOL_DEFINITION = {
     }
 }
 
-SYSTEM_PROMPT = """Sen Hermes Agent'ın beynisin. Kod yazma, dosya okuma/yazma veya test çalıştırma isteklerinde 'run_in_sandbox' aracını çağirmalisin. Sadece listedeki güvenli komutları üret.
-
-Mevcut araçlar:
-- run_in_sandbox: Güvenli Linux komut çalıştırma (node, python, bash, echo, ls, cat, pytest, git, curl, wget, vb.)
-
-Yasaklı komutlar: rm -rf /, dd, mkfs, fdisk, vb. Sistem değişikliği yapan komutlar yasaktır."""
+SYSTEM_PROMPT = """Hermes AI. Alper'in asistanı. Türkçe yanıt ver. Kod/terminal için run_in_sandbox kullan. Kısa ve net ol."""
 
 
 class HermesBrain:
     """Hermes Brain agent wrapping HermesManager with simple ask_hermes interface.
 
-    Uses Ollama qwen2.5-coder:7b for reasoning and tool-calling, with direct
+    Uses Ollama qwen2.5-coder:1.5b for reasoning and tool-calling, with direct
     command execution via the router's /execute endpoint.
 
     Attributes:
@@ -71,10 +66,12 @@ class HermesBrain:
         self.config = get_config()
         self._http_client: Optional[httpx.AsyncClient] = None
         self.router_url = router_url or self.config.router_url or "http://localhost:8000/execute"
-        self.ollama_url = self.config.ollama_url or "http://localhost:11434"
-        self.model = self.config.ollama_model or "qwen2.5-coder:7b"
+        import os
+        self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+        self.deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+        self.deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
         logger.info(
-            f"HermesBrain initialized (ollama={self.ollama_url}, router={self.router_url})"
+           f"HermesBrain initialized (model={self.deepseek_model}, router={self.router_url})"
         )
 
     async def initialize(self) -> None:
@@ -88,42 +85,33 @@ class HermesBrain:
             await self._http_client.aclose()
             self._http_client = None
 
-    async def _call_ollama(
-        self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
-        """Call Ollama API with messages and tools.
-
-        Args:
-            messages: List of message dicts with role and content.
-            tools: Optional list of tool definitions.
-
-        Returns:
-            Dict[str, Any]: Ollama response.
-        """
-        if self._http_client is None:
-            await self.initialize()
-
+    async def _call_ollama(self, messages: list, tools=None):
+        """DeepSeek API with tool calling support."""
+        headers = {
+            "Authorization": f"Bearer {self.deepseek_api_key}",
+            "Content-Type": "application/json"
+        }
         payload = {
-            "model": self.model,
+            "model": self.deepseek_model,
             "messages": messages,
-            "stream": False,
+            "temperature": 0.7
         }
         if tools:
             payload["tools"] = tools
-
+            payload["tool_choice"] = "auto"
         try:
-            response = await self._http_client.post(
-                f"{self.ollama_url}/api/chat",
-                json=payload,
-            )
-            response.raise_for_status()
-            return response.json()
+            url = self.deepseek_base_url.rstrip(chr(47)) + chr(47) + "chat/completions"
+            response = await self._http_client.post(url, json=payload, headers=headers, timeout=60.0)
+            res_json = response.json()
+            choice = res_json["choices"][0]
+            message = choice["message"]
+            # Tool call requested
+            if message.get("tool_calls"):
+                return {"tool_calls": message["tool_calls"], "content": message.get("content", "")}
+            # Normal response
+            return message.get("content", "")
         except Exception as e:
-            logger.error(f"Ollama API error: {e}")
-            return {"error": str(e)}
-
+            return f"Sistem hatasi: {str(e)}"
     async def _execute_command(self, command: str) -> Dict[str, Any]:
         """Execute a command via the router's /execute endpoint.
 
@@ -156,77 +144,79 @@ class HermesBrain:
                 "error": f"Router bağlantı hatası: {str(e)}",
             }
 
-    async def ask_hermes(self, user_prompt: str) -> Dict[str, Any]:
-        """Process a user prompt through Hermes Brain.
+    async def get_history(self, chat_id: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Load conversation history from SQLite."""
+        import aiosqlite
+        async with aiosqlite.connect("./hermes_memory.db") as db:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS chat_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id TEXT,
+                    role TEXT,
+                    content TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.commit()
+            cursor = await db.execute(
+                "SELECT role, content FROM chat_history WHERE chat_id=? ORDER BY id DESC LIMIT ?",
+                (chat_id, limit)
+            )
+            rows = await cursor.fetchall()
+            return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
 
-        Implements the tool-calling loop:
-        1. Send prompt + system to Ollama with tools
-        2. If model requests tool call, execute via router
-        3. Return result or response
+    async def save_message(self, chat_id: str, role: str, content: str) -> None:
+        """Save a message to SQLite."""
+        import aiosqlite
+        async with aiosqlite.connect("./hermes_memory.db") as db:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS chat_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id TEXT,
+                    role TEXT,
+                    content TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute(
+                "INSERT INTO chat_history (chat_id, role, content) VALUES (?, ?, ?)",
+                (chat_id, role, content)
+            )
+            await db.commit()
 
-        Args:
-            user_prompt: User's request/prompt.
-
-        Returns:
-            Dict[str, Any]: Result with status, response, and any tool outputs.
-        """
+    async def ask_hermes(self, user_prompt: str, chat_id: str = "default") -> Dict[str, Any]:
+        """Process a user prompt through Hermes Brain."""
         logger.info(f"HermesBrain processing: {user_prompt[:100]}...")
 
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
+        history = await self.get_history(chat_id)
+        await self.save_message(chat_id, "user", user_prompt)
 
-        # First call to Ollama with tool definitions
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_prompt})
+
+        # Detect if task needs tool use or is just conversation
+        needs_tool = any(kw in user_prompt.lower() for kw in ["çalıştır", "yaz", "kod", "python", "node", "bash", "ls", "cat", "script", "run", "execute", "dosya", "file"])
         response = await self._call_ollama(messages, tools=[SANDBOX_TOOL_DEFINITION])
-
-        if "error" in response:
-            return {
-                "status": "failed",
-                "error": response["error"],
-                "response": None,
-            }
-
-        message = response.get("message", {})
-
-        # Check for tool calls
-        if "tool_calls" in message:
+        if isinstance(response, str) and response.startswith("Sistem hatasi"):
+            return {"status": "failed", "error": response, "response": None}
+        # Tool call requested by model
+        if isinstance(response, dict) and response.get("tool_calls"):
             tool_results = []
-            for tool_call in message["tool_calls"]:
-                func_name = tool_call["function"]["name"]
-                arguments = tool_call["function"]["arguments"]
-
-                if isinstance(arguments, str):
-                    try:
-                        arguments = json.loads(arguments)
-                    except json.JSONDecodeError:
-                        arguments = {"raw": arguments}
-
+            for tc in response["tool_calls"]:
+                func_name = tc["function"]["name"]
+                import json as _json
+                try:
+                    args = _json.loads(tc["function"]["arguments"])
+                except Exception:
+                    args = {}
                 if func_name == "run_in_sandbox":
-                    command = arguments.get("command", "")
+                    command = args.get("command", "")
                     logger.info(f"Executing sandbox command: {command}")
-
                     exec_result = await self._execute_command(command)
-                    tool_results.append({
-                        "tool": func_name,
-                        "command": command,
-                        "result": exec_result,
-                    })
-
-                    logger.info(f"Sandbox output: {exec_result}")
-
-            return {
-                "status": "success",
-                "response": message.get("content", ""),
-                "tool_calls": tool_results,
-            }
-        else:
-            # No tool call, return content directly
-            return {
-                "status": "success",
-                "response": message.get("content", ""),
-                "tool_calls": [],
-            }
+                    tool_results.append({"tool": func_name, "command": command, "result": exec_result})
+            return {"status": "success", "response": response.get("content", ""), "tool_calls": tool_results}
+        return {"status": "success", "response": response, "tool_calls": []}
 
     async def decompose_and_execute(
         self, task_description: str, context: Optional[Dict[str, Any]] = None
@@ -244,7 +234,7 @@ class HermesBrain:
 
         manager = HermesManager()
         await manager.initialize()
-
+        await manager.async_initialize()
         try:
             # Decompose task
             task = await manager.decompose_task(task_description, context)

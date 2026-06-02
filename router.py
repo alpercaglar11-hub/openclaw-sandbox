@@ -247,6 +247,7 @@ class TelegramBot:
         self.application = Application.builder().token(self.token).build()
 
         # Register command handlers
+        from telegram.ext import MessageHandler, filters
         self.application.add_handler(CommandHandler("start", self._cmd_start))
         self.application.add_handler(CommandHandler("status", self._cmd_status))
         self.application.add_handler(CommandHandler("agents", self._cmd_agents))
@@ -255,6 +256,7 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("kill", self._cmd_kill))
         self.application.add_handler(CommandHandler("approve", self._cmd_approve))
         self.application.add_handler(CommandHandler("reject", self._cmd_reject))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
 
         await self.application.initialize()
         await self.application.start()
@@ -346,6 +348,7 @@ class TelegramBot:
 
     async def _cmd_task(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /task command."""
+        logging.getLogger("openclaw").info(f"_cmd_task fired: chat_id={update.effective_chat.id} args={context.args}")
         if not self._is_authorized(update.effective_chat.id):
             await update.message.reply_text("⛔ Unauthorized")
             return
@@ -382,6 +385,34 @@ class TelegramBot:
 
         await update.message.reply_text(f"🛑 Kill request for task {task_id} acknowledged")
 
+    async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("⛔ Unauthorized")
+            return
+        user_text = update.message.text
+        await update.message.reply_text("⏳ İşleniyor...")
+        try:
+            from agents.hermes_brain import HermesBrain
+            brain = HermesBrain(router_url="http://localhost:8000/execute")
+            await brain.initialize()
+            chat_id = str(update.effective_chat.id)
+            result = await brain.ask_hermes(user_text, chat_id=chat_id)
+            response = result.get("response") or ""
+            tool_calls = result.get("tool_calls", [])
+            parts = []
+            if response:
+                parts.append(response)
+            for tc in tool_calls:
+                stdout = tc.get("result", {}).get("stdout", "")[:500]
+                cmd = tc.get("command", "")
+                if stdout:
+                    parts.append(f"`$ {cmd}`\n```\n{stdout}\n```")
+            reply = "\n\n".join(parts) if parts else "✅ Tamamlandı"
+            await update.message.reply_text(reply, parse_mode="Markdown")
+            await brain.save_message(chat_id, "assistant", reply)
+            await brain.close()
+        except Exception as e:
+            await update.message.reply_text(f"❌ Hata: {str(e)}")
     async def _cmd_approve(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /approve command."""
         if not self._is_authorized(update.effective_chat.id):
@@ -502,7 +533,7 @@ async def check_ollama(config: "Config") -> Dict[str, Any]:
     """
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{config.ollama_url}/api/tags")
+            return {"status": "disabled", "reachable": False, "url": "none", "details": "Ollama disabled, using DeepSeek"}
             if response.status_code == 200:
                 return {
                     "status": "healthy",
@@ -520,7 +551,7 @@ async def check_ollama(config: "Config") -> Dict[str, Any]:
     except httpx.TimeoutException:
         return {"status": "unhealthy", "reachable": True, "url": config.ollama_url, "details": "Timeout"}
     except Exception as e:
-        return {"status": "unavailable", "reachable": False, "url": config.ollama_url, "details": str(e)}
+        return {"status": "unavailable", "reachable": False, "url": getattr(config, "ollama_url", "none"), "details": str(e)}
 
 
 async def check_sqlite(db_path: str = "./openclaw.db") -> Dict[str, Any]:
@@ -591,6 +622,13 @@ async def lifespan(app: FastAPI):
     # Initialize Telegram bot
     if config.telegram_bot_token:
         telegram_bot = TelegramBot(config.telegram_bot_token, config.admin_chat_id)
+        
+        class _RouterRef:
+            pass
+        router_ref = _RouterRef()
+        router_ref.hermes_manager = hermes_manager
+        router_ref._get_status = get_status
+        telegram_bot.set_router(router_ref)
         try:
             await telegram_bot.start()
         except Exception as e:
