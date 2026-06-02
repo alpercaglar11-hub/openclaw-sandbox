@@ -5,3 +5,9 @@ venv/
 env/
 .sqlite
 *.log
+node_modules/
+*.db
+.env
+__pycache__/
+*.pyc
+.venv/
